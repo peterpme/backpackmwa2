@@ -14,27 +14,18 @@ import {
   TransactionInstruction,
 } from '@solana/web3.js';
 import {Buffer} from 'buffer';
+import Watcher from './Watcher';
 
 import React from 'react';
-import type {PropsWithChildren} from 'react';
 import {
   SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
   Text,
-  useColorScheme,
   View,
   Button,
+  NativeModules,
+  Linking,
+  NativeEventEmitter,
 } from 'react-native';
-
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
 
 const BK_DEV_SECRET = new Buffer([
   181, 74, 222, 193, 247, 42, 40, 85, 228, 88, 172, 45, 191, 134, 50, 129, 189,
@@ -43,11 +34,10 @@ const BK_DEV_SECRET = new Buffer([
   152, 200, 157, 224, 61, 208, 67, 104, 143, 183, 216, 139, 92, 235,
 ]);
 
+const WALLET = Keypair.fromSecretKey(BK_DEV_SECRET);
 const RECEIVER = new PublicKey('EcxjN4mea6Ah9WSqZhLtSJJCZcxY73Vaz6UVHFZZ5Ttz');
 
-const WALLET = Keypair.fromSecretKey(BK_DEV_SECRET);
 const network = clusterApiUrl('mainnet-beta');
-console.log('network', network);
 let connection = new Connection('https://swr.xnfts.dev/rpc-proxy/');
 
 async function requestAirdrop(publicKey: PublicKey) {
@@ -78,6 +68,14 @@ async function requestAirdrop(publicKey: PublicKey) {
   } catch (error) {
     console.error('confirm transaction success', error);
   }
+}
+
+async function getAccountInfo(payer) {
+  const accountInfo = await connection.getAccountInfo(payer.publicKey);
+  console.log('accountInfo', accountInfo);
+  console.log('accountInfo:data', Buffer.from(accountInfo.data).toJSON());
+  console.log('accountInfo:data', accountInfo.data.toJSON());
+  console.log('accountInfo:owner', accountInfo.owner.toString());
 }
 
 async function makeTransaction(payer, receiver: PublicKey) {
@@ -145,20 +143,9 @@ async function makeTransaction(payer, receiver: PublicKey) {
   }
 }
 
-function App(): JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
-  };
-
+function NormalAppExperience() {
   return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <Header />
+    <SafeAreaView>
       <Button
         title="Send Money"
         onPress={() => {
@@ -166,8 +153,127 @@ function App(): JSX.Element {
           makeTransaction(WALLET, RECEIVER);
         }}
       />
+      <Button
+        title="Get Account Info"
+        onPress={() => {
+          getAccountInfo(WALLET);
+        }}
+      />
+      <Button
+        title="Try Test"
+        onPress={() => {
+          NativeModules.MwaWalletLibModule.tryTest('hello');
+        }}
+      />
     </SafeAreaView>
   );
+}
+
+function App(): JSX.Element {
+  const [event, setEvent] = React.useState(null);
+
+  function initiateWalletScenario(intent /* string */) {
+    NativeModules.MwaWalletLibModule.createScenario(
+      'Backpack', // wallet name
+      intent,
+      (event, errorMsg) => {
+        switch (event) {
+          case 'ERROR':
+            console.error('ERROR', errorMsg);
+            break;
+          default:
+            console.log('SUCCESS');
+        }
+      },
+    );
+  }
+
+  function handleNativeEvent(event) {
+    setEvent(event.type);
+    switch (event.type) {
+      case 'ON_SCENARIO_READY':
+        console.log('SCENARIO_READY');
+        break;
+      case 'SCENARIO_COMPLETE':
+        console.log('SCENARIO_COMPLETE');
+        break;
+      case 'SCENARIO_ERROR':
+        console.log('SCENARIO_ERROR');
+        break;
+      case 'SCENARIO_TEARDOWN_COMPLETE':
+        console.log('SCENARIO_TEARDOWN_COMPLETE');
+        break;
+      case 'AUTHORIZE_REQUEST':
+        console.log('AUTHORIZE_REQUEST');
+        break;
+      case 'RE_AUTHORIZE_REQUEST':
+        console.log('RE_AUTHORIZE_REQUEST');
+        break;
+      case 'SIGN_TRANSACTION_REQUEST':
+        console.log('SIGN_TRANSACTION_REQUEST');
+        break;
+      case 'SIGN_MESSAGE_REQUEST':
+        console.log('SIGN_MESSAGE_REQUEST');
+        break;
+      case 'SIGN_AND_SEND_TRANSACTION_REQUEST':
+        console.log('SIGN_AND_SEND_TRANSACTION_REQUEST');
+        break;
+      case 'DE_AUTHORIZE_EVENT':
+        console.log('DE_AUTHORIZE_EVENT');
+        break;
+      case 'SCENARIO_SERVING_CLIENTS':
+        console.log('SCENARIO_SERVING_CLIENTS');
+        break;
+      default:
+        console.log('UNKNOWN_EVENT', event);
+    }
+  }
+
+  // fires if app is open
+  // solana-wallet://1/associate/local
+  React.useEffect(() => {
+    Linking.addEventListener('url', evt => {
+      const {url} = evt;
+      if (url && url.startsWith('solana-wallet:/v1/associate/local')) {
+        initiateWalletScenario(url);
+      }
+    });
+
+    return () => {
+      Linking.removeAllListeners('url');
+    };
+  }, []);
+
+  //
+  // // fires if app is closed
+  React.useEffect(() => {
+    async function f() {
+      const url = await Linking.getInitialURL();
+      if (url && url.startsWith('solana-wallet:/v1/associate/local')) {
+        initiateWalletScenario(url);
+      }
+    }
+
+    f();
+  }, []);
+
+  React.useEffect(() => {
+    const eventEmitter = new NativeEventEmitter(
+      NativeModules.MwaWalletLibModule,
+    );
+
+    eventEmitter.addListener('MWA_EVENT', handleNativeEvent);
+
+    return () => {
+      // eventEmitter.removeListeners();
+    };
+  }, []);
+
+  if (event == null) {
+    return <NormalAppExperience />;
+  }
+
+  return <Watcher wallet={WALLET} event={event} />;
 }
 
 export default App;
