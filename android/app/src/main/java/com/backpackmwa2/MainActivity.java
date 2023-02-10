@@ -5,6 +5,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 
 import com.facebook.react.ReactActivity;
@@ -25,6 +26,7 @@ public class MainActivity extends ReactActivity {
                         Log.d("SCHEME", "SOLANA_WALLET");
                         WindowManager.LayoutParams windowLayoutParams = getWindow().getAttributes();
 
+                        getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
                         windowLayoutParams.gravity = Gravity.BOTTOM;
                         windowLayoutParams.flags = windowLayoutParams.flags & WindowManager.LayoutParams.FLAG_DIM_BEHIND;
 
